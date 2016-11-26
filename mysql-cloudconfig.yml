@@ -1,0 +1,59 @@
+#cloud-config
+
+coreos:
+
+  units:
+  - name: droplan-setup.service
+    command: start
+    content: |
+      [Unit]
+      Description=setup droplan iptable rules for docker
+
+      [Service]
+      Type=oneshot
+      After=docker.service
+      ExecStart=/usr/bin/sh -c "docker ps; \
+        iptables -N droplan-peers; \
+        iptables -I FORWARD 1 -i eth1 -j DROP; \
+        iptables -I FORWARD 1 -i eth1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT; \
+        iptables -I FORWARD 1 -j droplan-peers"
+
+  - name: droplan.service
+    command: start
+    content: |
+      [Unit]
+      Description=updates iptables with peer droplets
+      After=droplan-setup.service
+      Requires=docker.service
+
+      [Service]
+      Type=oneshot
+      Environment=DO_KEY=c0ebe90eb114cfc1f6090ecaa865ca6c21970c72b2116b72b507675b9ec34aa1
+      Environment=DO_TAG=trubthumping
+      ExecStart=/usr/bin/docker run --rm --net=host --cap-add=NET_ADMIN -e DO_KEY -e DO_TAG tam7t/droplan:latest
+
+  - name: droplan.timer
+    command: start
+    content: |
+      [Unit]
+      Description=Run droplan.service every 5 minutes
+
+      [Timer]
+      OnCalendar=*:0/5
+
+  - name: mysql.service
+    command: start
+    content: |
+      [Unit]
+      Description=Databases
+      Requires=docker.service
+      After=docker.service
+
+      [Service]
+      Restart=always
+      ExecStart=/usr/bin/docker run -p $private_ipv4:3306:3306 -v /var/lib/mysql:/docker/mysql:rw --env MYSQL_ROOT_PASSWORD=somepasswordthatihopeissafe --name mysql mysql
+      ExecStop=/usr/bin/docker stop -t 2 mysql
+      ExecStopPost=/usr/bin/docker rm -f mysql
+
+      [Install]
+      WantedBy=default.target
